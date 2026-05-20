@@ -50,8 +50,20 @@ def is_running(pid_file: Path) -> tuple[bool, int]:
         return False, 0
     pid = int(pid_file.read_text().strip())
     try:
-        os.kill(pid, 0)
-        return True, pid
+        if sys.platform == "win32":
+            # Windows: use tasklist to check PID
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}"],
+                capture_output=True, text=True
+            )
+            if str(pid) in result.stdout:
+                return True, pid
+            else:
+                pid_file.unlink(missing_ok=True)
+                return False, 0
+        else:
+            os.kill(pid, 0)
+            return True, pid
     except OSError:
         pid_file.unlink(missing_ok=True)
         return False, 0
@@ -88,13 +100,12 @@ def start_server(args):
     print(f"    Log: {log_file}")
 
     with open(log_file, "a") as lf:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=lf,
-            stderr=subprocess.STDOUT,
-            cwd=str(BASE_DIR),
-            start_new_session=True,
-        )
+        kwargs = {"stdout": lf, "stderr": subprocess.STDOUT, "cwd": str(BASE_DIR)}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kwargs["start_new_session"] = True
+        proc = subprocess.Popen(cmd, **kwargs)
 
     PID_FILE.write_text(str(proc.pid))
     save_config({
@@ -135,7 +146,11 @@ def stop_server(args=None):
     if running:
         print(f"[*] Stopping server (PID {pid})...")
         try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                               capture_output=True)
+            else:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
         except (OSError, ProcessLookupError):
             try:
                 os.kill(pid, signal.SIGTERM)
@@ -167,11 +182,14 @@ def start_tunnel(port: int = None):
 
     print(f"[*] Starting cloudflared tunnel (tts.liveyt.pro)...")
     with open(tunnel_log, "w") as lf:
+        kwargs = {"stdout": lf, "stderr": subprocess.STDOUT}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             ["cloudflared", "tunnel", "--config", str(tunnel_config), "run", "tts-api"],
-            stdout=lf,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
+            **kwargs
         )
 
     TUNNEL_PID_FILE.write_text(str(proc.pid))
@@ -201,7 +219,11 @@ def stop_tunnel(args=None):
     if running:
         print(f"[*] Stopping tunnel (PID {pid})...")
         try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                               capture_output=True)
+            else:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
         except (OSError, ProcessLookupError):
             try:
                 os.kill(pid, signal.SIGTERM)
