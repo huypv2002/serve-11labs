@@ -51,16 +51,25 @@ def is_running(pid_file: Path) -> tuple[bool, int]:
     pid = int(pid_file.read_text().strip())
     try:
         if sys.platform == "win32":
-            # Windows: use tasklist to check PID
+            # Windows: check if port is listening (more reliable than PID check)
+            config = load_config()
+            port = config.get("port", 8899)
+            try:
+                import urllib.request
+                resp = urllib.request.urlopen(f"http://localhost:{port}/health", timeout=2)
+                if resp.status == 200:
+                    return True, pid
+            except Exception:
+                pass
+            # Fallback: check tasklist
             result = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}"],
-                capture_output=True, text=True
+                capture_output=True, text=True, encoding="utf-8", errors="ignore"
             )
             if str(pid) in result.stdout:
                 return True, pid
-            else:
-                pid_file.unlink(missing_ok=True)
-                return False, 0
+            pid_file.unlink(missing_ok=True)
+            return False, 0
         else:
             os.kill(pid, 0)
             return True, pid
