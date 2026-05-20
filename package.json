@@ -1,0 +1,11 @@
+{
+  "name": "serve-11labs",
+  "version": "1.0.0",
+  "description": "hCaptcha solver dependencies for TTS server",
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "jsdom": "^29.1.1",
+    "patchright": "^1.59.4",
+    "playwright": "^1.60.0"
+  }
+}

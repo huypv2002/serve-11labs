@@ -1,0 +1,12 @@
+node_modules/
+__pycache__/
+*.pyc
+logs/
+.tts_server.pid
+.tts_tunnel.pid
+.tts_server.json
+*.log
+*.mp3
+*.wav
+output_*/
+batch/

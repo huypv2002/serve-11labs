@@ -1,0 +1,5 @@
+httpx
+aiohttp
+PyJWT
+tls_client
+camoufox
