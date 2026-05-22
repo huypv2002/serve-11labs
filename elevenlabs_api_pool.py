@@ -52,8 +52,11 @@ TOKEN_TTL = 120  # seconds — tokens expire after 120s
 
 PROXY_API = "https://proxyxoay.shop/api/get.php"
 PROXY_KEYS = [
-    "mWaQAhVpDxNSxQMshMpfvV",
-    "ejvdCkHfVufMQdUCefruiR",
+    "WGVvsWnSIkNoBlcIffKFPJ",
+    "HWgDVrhXHdgVlbOGFLucVp",
+    "gIyeGmqZSePouzcZEwAKhy",
+    "mrpLsUPXIBPnVFoQqAOVzu",
+    "BRULyVzrPiecrdwDgmFjBd",
 ]
 
 
