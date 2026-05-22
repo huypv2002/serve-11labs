@@ -50,7 +50,8 @@ PROXY_KEYS = [
     "WGVvsWnSIkNoBlcIffKFPJ",
     "HWgDVrhXHdgVlbOGFLucVp",
     "gIyeGmqZSePouzcZEwAKhy",
-    "mrpLsUPXIBPnVFoQqAOVzu"
+    "mrpLsUPXIBPnVFoQqAOVzu",
+    "BRULyVzrPiecrdwDgmFjBd",
 ]
 
 
