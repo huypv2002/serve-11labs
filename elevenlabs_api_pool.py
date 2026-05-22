@@ -49,6 +49,8 @@ DEFAULT_VOICE = "NOpBlnGInO9m6vDvFkFC"
 DEFAULT_MODEL = "eleven_v3"
 REQUESTS_PER_IP = 3
 TOKEN_TTL = 120  # seconds — tokens expire after 120s
+HTTP_TIMEOUT_SECONDS = 20
+TOKEN_SOLVE_TIMEOUT_SECONDS = 75
 
 PROXY_API = "https://proxyxoay.shop/api/get.php"
 PROXY_KEYS = [
@@ -166,9 +168,12 @@ class TokenPool:
         self._total_solved = 0
         self._total_expired = 0
         self._total_served = 0
+        self._total_failed = 0
         self._running = False
         self._solver_tasks = {}  # key -> Task
         self._cleanup_task = None
+        self._last_error = None
+        self._solver_states = {}
 
     @property
     def available(self) -> int:
@@ -256,15 +261,40 @@ class TokenPool:
                 print(f"  [pool] error in cleanup loop: {e}", flush=True)
             await asyncio.sleep(2)
 
-    async def _solve_single_token(self, proxy: dict, browser) -> str:
+    def _set_solver_state(self, key: str, state: str, detail: str = ""):
+        self._solver_states[key[:6]] = {
+            "state": state,
+            "detail": detail[:120],
+            "updated_at": round(time.time(), 1),
+        }
+
+    def _record_failure(self, key: str, phase: str, err: Exception):
+        err_text = f"{type(err).__name__}: {err}"
+        self._total_failed += 1
+        self._last_error = f"{key[:6]} {phase}: {err_text[:160]}"
+        self._set_solver_state(key, "error", f"{phase}: {err_text}")
+
+    async def _solve_single_token(self, key: str, proxy: dict, browser, token_idx: int) -> str:
         """Solve a single token using the given proxy and browser context."""
-        req_token, version, config = await asyncio.to_thread(
-            get_hcaptcha_materials, proxy["http"]
+        tag = f"{key[:6]}#{token_idx}"
+        print(f"  [token-{tag}] materials...", flush=True)
+        req_token, version, config = await asyncio.wait_for(
+            asyncio.to_thread(get_hcaptcha_materials, proxy["http"]),
+            timeout=HTTP_TIMEOUT_SECONDS + 5,
         )
-        hsw_token = await solve_hsw(req_token, proxy["http"], browser)
-        hcaptcha_token = await asyncio.to_thread(
-            submit_captcha, hsw_token, version, config, proxy["http"]
+
+        print(f"  [token-{tag}] hsw...", flush=True)
+        hsw_token = await asyncio.wait_for(
+            solve_hsw(req_token, proxy["http"], browser),
+            timeout=HTTP_TIMEOUT_SECONDS + 25,
         )
+
+        print(f"  [token-{tag}] submit...", flush=True)
+        hcaptcha_token = await asyncio.wait_for(
+            asyncio.to_thread(submit_captcha, hsw_token, version, config, proxy["http"]),
+            timeout=HTTP_TIMEOUT_SECONDS + 5,
+        )
+        print(f"  [token-{tag}] solved", flush=True)
         return hcaptcha_token
 
     async def _solver_loop(self, key: str):
@@ -273,13 +303,17 @@ class TokenPool:
         await asyncio.sleep(random.uniform(0.5, 3.0))
 
         while self._running:
+            cycle_started = False
             try:
                 # Check if pool needs more tokens
                 if self.available >= self.target_size:
+                    self._set_solver_state(key, "idle", f"pool full ({self.available}/{self.target_size})")
                     await asyncio.sleep(2)
                     continue
 
                 self._solving += 1
+                cycle_started = True
+                self._set_solver_state(key, "requesting_proxy")
                 print(f"  [solver-{key[:6]}] requesting proxy...", flush=True)
                 
                 t_ip_acquired = time.time()
@@ -288,16 +322,24 @@ class TokenPool:
 
                 # Solve 3-5 tokens using this IP
                 num_tokens = random.randint(3, 5)
+                self._set_solver_state(key, "solving", f"{proxy['raw']} x{num_tokens}")
                 print(f"  [solver-{key[:6]}] IP acquired: {proxy['raw']}. Solving {num_tokens} tokens...", flush=True)
 
                 async with AsyncCamoufox(headless=True, os='windows', proxy={'server': proxy["http"]}) as browser:
-                    tasks = [self._solve_single_token(proxy, browser) for _ in range(num_tokens)]
+                    tasks = [
+                        asyncio.wait_for(
+                            self._solve_single_token(key, proxy, browser, i + 1),
+                            timeout=TOKEN_SOLVE_TIMEOUT_SECONDS,
+                        )
+                        for i in range(num_tokens)
+                    ]
                     results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 success_count = 0
                 now = time.time()
                 for res in results:
                     if isinstance(res, Exception):
+                        self._record_failure(key, "token", res)
                         print(f"  [solver-{key[:6]}] ✗ token solve failed: {str(res)[:80]}", flush=True)
                     else:
                         success_count += 1
@@ -305,8 +347,10 @@ class TokenPool:
                         async with self._lock:
                             self._tokens.append((res, proxy, now))
 
-                self._solving -= 1
                 print(f"  [solver-{key[:6]}] ✓ finished cycle: {success_count}/{num_tokens} solved (pool={self.available})", flush=True)
+                self._set_solver_state(key, "cooldown", f"{success_count}/{num_tokens} solved")
+                self._solving = max(0, self._solving - 1)
+                cycle_started = False
 
                 # Cooldown wait: ensure we wait at least 60 seconds from IP fetch to respect provider limit
                 elapsed = time.time() - t_ip_acquired
@@ -318,9 +362,12 @@ class TokenPool:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                self._solving -= 1
+                self._record_failure(key, "cycle", e)
                 print(f"  [solver-{key[:6]}] ✗ error: {str(e)[:80]}", flush=True)
                 await asyncio.sleep(5)
+            finally:
+                if cycle_started:
+                    self._solving = max(0, self._solving - 1)
 
 
 def get_hcaptcha_materials(proxy_http: str) -> tuple[str, str, dict]:
@@ -338,13 +385,20 @@ def get_hcaptcha_materials(proxy_http: str) -> tuple[str, str, dict]:
     if proxy_http:
         session.proxies = {'http': proxy_http, 'https': proxy_http}
 
-    api_js = session.get('https://hcaptcha.com/1/api.js?render=explicit&onload=hcaptchaOnLoad').text
+    api_js = session.get(
+        'https://hcaptcha.com/1/api.js?render=explicit&onload=hcaptchaOnLoad',
+        timeout_seconds=HTTP_TIMEOUT_SECONDS,
+    ).text
     versions = re.findall(r'v1/([A-Za-z0-9]+)/static', api_js)
     version = versions[1] if len(versions) > 1 else "unknown"
 
-    config = session.post("https://api2.hcaptcha.com/checksiteconfig", params={
-        'v': version, 'host': HOST, 'sitekey': SITEKEY, 'sc': '1', 'swa': '1', 'spst': '1',
-    }).json()
+    config = session.post(
+        "https://api2.hcaptcha.com/checksiteconfig",
+        params={
+            'v': version, 'host': HOST, 'sitekey': SITEKEY, 'sc': '1', 'swa': '1', 'spst': '1',
+        },
+        timeout_seconds=HTTP_TIMEOUT_SECONDS,
+    ).json()
 
     if 'c' not in config or 'req' not in config.get('c', {}):
         raise RuntimeError(f"checksiteconfig failed: {json.dumps(config)[:100]}")
@@ -352,8 +406,8 @@ def get_hcaptcha_materials(proxy_http: str) -> tuple[str, str, dict]:
     return config['c']['req'], version, config
 
 
-async def solve_hsw(req_token: str, proxy_http: str, browser) -> str:
-    """Solve HSW in Camoufox browser page."""
+def fetch_hsw_js(req_token: str, proxy_http: str) -> str:
+    """Fetch hsw.js without blocking the asyncio event loop."""
     session = tls_client.Session(client_identifier="chrome_130", random_tls_extension_order=True)
     session.headers = {
         'accept': '*/*', 'accept-language': 'en-US,en;q=0.9',
@@ -364,7 +418,15 @@ async def solve_hsw(req_token: str, proxy_http: str, browser) -> str:
 
     decoded = jwt.decode(req_token, options={"verify_signature": False})
     hsw_url = "https://newassets.hcaptcha.com" + decoded["l"] + "/hsw.js"
-    hsw_js = session.get(hsw_url).text
+    hsw_js = session.get(hsw_url, timeout_seconds=HTTP_TIMEOUT_SECONDS).text
+    if not hsw_js or "function" not in hsw_js:
+        raise RuntimeError("hsw.js fetch returned invalid content")
+    return hsw_js
+
+
+async def solve_hsw(req_token: str, proxy_http: str, browser) -> str:
+    """Solve HSW in Camoufox browser page."""
+    hsw_js = await asyncio.to_thread(fetch_hsw_js, req_token, proxy_http)
 
     page = await browser.new_page()
     try:
@@ -427,7 +489,11 @@ def submit_captcha(hsw_token: str, version: str, config: dict, proxy_http: str) 
         'v': version, 'sitekey': SITEKEY, 'host': HOST, 'hl': 'en',
         'motionData': json.dumps(motion), 'n': hsw_token, 'c': json.dumps(config['c']),
     }
-    resp = session.post(f"https://api2.hcaptcha.com/getcaptcha/{SITEKEY}", data=data)
+    resp = session.post(
+        f"https://api2.hcaptcha.com/getcaptcha/{SITEKEY}",
+        data=data,
+        timeout_seconds=HTTP_TIMEOUT_SECONDS,
+    )
     result = resp.json()
 
     if 'generated_pass_UUID' in result:
@@ -534,7 +600,10 @@ async def handle_health(request):
         "total_solved": token_pool._total_solved,
         "total_served": token_pool._total_served,
         "total_expired": token_pool._total_expired,
+        "total_failed": token_pool._total_failed,
         "solving_now": token_pool._solving,
+        "last_error": token_pool._last_error,
+        "solver_states": token_pool._solver_states,
         "time": time.time(),
     })
 
