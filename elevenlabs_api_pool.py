@@ -518,6 +518,15 @@ def log_request(client_ip: str, text_preview: str, status: str, detail: str):
     print(f"  [log] {status} | {client_ip} | {text_preview[:30]}...", flush=True)
 
 
+def upstream_error_payload(status_code: int, body: str) -> dict:
+    """Build a bounded JSON-safe upstream error payload for debugging."""
+    return {
+        "error": "TTS upstream error",
+        "upstream_status": status_code,
+        "upstream_body": body[:500],
+    }
+
+
 # === API Handlers ===
 
 async def handle_tts(request):
@@ -562,6 +571,13 @@ async def handle_tts(request):
             resp = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
 
         if resp.status_code == 200:
+            if not resp.content:
+                elapsed = time.time() - t0
+                log_request(client_ip, text[:50], "fail", f"upstream 200 empty body ({elapsed:.1f}s)")
+                return web.json_response({
+                    "error": "TTS upstream returned empty audio",
+                    "upstream_status": 200,
+                }, status=502)
             elapsed = time.time() - t0
             log_request(client_ip, text[:50], "success", f"{len(resp.content)}B in {elapsed:.1f}s (token_wait={t_token:.1f}s)")
             return web.Response(
@@ -572,13 +588,15 @@ async def handle_tts(request):
         elif resp.status_code == 401:
             await token_pool.proxy_pool.mark_quota_hit(proxy)
             elapsed = time.time() - t0
-            log_request(client_ip, text[:50], "fail", f"401 quota hit ({elapsed:.1f}s)")
-            return web.json_response({"error": "TTS service temporarily unavailable, please retry"}, status=503)
+            body_preview = resp.text[:500]
+            log_request(client_ip, text[:50], "fail", f"upstream 401 via {proxy['raw']}: {body_preview[:180]} ({elapsed:.1f}s)")
+            return web.json_response(upstream_error_payload(401, body_preview), status=503)
         else:
             elapsed = time.time() - t0
-            err = f"HTTP {resp.status_code}: {resp.text[:60]}"
+            body_preview = resp.text[:500]
+            err = f"upstream HTTP {resp.status_code}: {body_preview[:180]}"
             log_request(client_ip, text[:50], "fail", f"{err} ({elapsed:.1f}s)")
-            return web.json_response({"error": err}, status=500)
+            return web.json_response(upstream_error_payload(resp.status_code, body_preview), status=502)
 
     except RuntimeError as e:
         elapsed = time.time() - t0

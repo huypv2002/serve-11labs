@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
     active INTEGER DEFAULT 1,
     usage_count INTEGER DEFAULT 0,
     last_used TEXT,
-    rate_limit INTEGER DEFAULT 10,  -- requests per minute
+    rate_limit INTEGER DEFAULT 3,  -- requests per minute
     expires_at TEXT
 );
 

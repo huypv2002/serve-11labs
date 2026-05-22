@@ -85,7 +85,7 @@ with open("output.mp3", "wb") as f:
 | 401 | API key sai hoặc thiếu |
 | 402 | Hết số dư |
 | 400 | Text quá dài (>1000 ký tự) |
-| 429 | Quá giới hạn rate limit |
+| 429 | Quá giới hạn rate limit (mặc định 3 request/phút, có thể chỉnh riêng từng API key trong admin) |
 
 ---
 
