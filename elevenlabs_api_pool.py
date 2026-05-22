@@ -16,7 +16,7 @@ Endpoints:
     Returns: list of available voices
 
 Usage:
-    python3 elevenlabs_api_pool.py --port 8900 --pool-size 5
+    python elevenlabs_api_pool.py --port 8900 --pool-size 5
     
     curl -X POST http://localhost:8900/tts \
       -H "Content-Type: application/json" \
@@ -48,7 +48,7 @@ API_BASE = "https://api.elevenlabs.io"
 DEFAULT_VOICE = "NOpBlnGInO9m6vDvFkFC"
 DEFAULT_MODEL = "eleven_v3"
 REQUESTS_PER_IP = 3
-TOKEN_TTL = 100  # seconds — tokens expire after ~120s, use 100s as safe margin
+TOKEN_TTL = 120  # seconds — tokens expire after 120s
 
 PROXY_API = "https://proxyxoay.shop/api/get.php"
 PROXY_KEYS = [
@@ -164,7 +164,8 @@ class TokenPool:
         self._total_expired = 0
         self._total_served = 0
         self._running = False
-        self._browser = None
+        self._solver_tasks = {}  # key -> Task
+        self._cleanup_task = None
 
     @property
     def available(self) -> int:
@@ -194,23 +195,79 @@ class TokenPool:
     async def start(self):
         """Start background token solving."""
         self._running = True
-        print(f"[*] Token pool started (target={self.target_size})", flush=True)
+        print(f"[*] Token pool starting (target={self.target_size})", flush=True)
+        
+        # Start cleanup loop
+        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+        
         # Start solver workers (1 per key to avoid proxy conflicts)
-        tasks = [
-            asyncio.create_task(self._solver_loop(i))
-            for i in range(len(PROXY_KEYS))
-        ]
-        return tasks
+        self._solver_tasks = {}
+        for key in list(self.proxy_pool.keys):
+            self._solver_tasks[key] = asyncio.create_task(self._solver_loop(key))
+            
+        print(f"[*] Token pool started with {len(self._solver_tasks)} solvers", flush=True)
+        return list(self._solver_tasks.values())
 
     async def stop(self):
         """Stop background solving."""
         self._running = False
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            self._cleanup_task = None
+        for key, task in list(self._solver_tasks.items()):
+            task.cancel()
+        self._solver_tasks = {}
+        print("[*] Token pool stopped", flush=True)
 
-    async def _solver_loop(self, worker_id: int):
-        """Continuously solve tokens to keep pool full."""
-        key = PROXY_KEYS[worker_id]
+    async def add_worker(self, key: str):
+        """Dynamically start a worker for a new key."""
+        if not self._running:
+            return
+        if key not in self._solver_tasks:
+            self._solver_tasks[key] = asyncio.create_task(self._solver_loop(key))
+            print(f"  [pool] started worker for key {key[:6]}...", flush=True)
+
+    async def remove_worker(self, key: str):
+        """Dynamically stop a worker for a removed key."""
+        task = self._solver_tasks.pop(key, None)
+        if task:
+            task.cancel()
+            print(f"  [pool] stopped worker for key {key[:6]}...", flush=True)
+
+    async def _cleanup_loop(self):
+        """Background task to remove expired tokens (> 120s)."""
+        while self._running:
+            try:
+                now = time.time()
+                expired_count = 0
+                async with self._lock:
+                    while self._tokens and (now - self._tokens[0][2] >= TOKEN_TTL):
+                        _, _, solved_at = self._tokens.popleft()
+                        expired_count += 1
+                        self._total_expired += 1
+                if expired_count > 0:
+                    print(f"  [pool] actively cleared {expired_count} expired tokens (available={self.available})", flush=True)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"  [pool] error in cleanup loop: {e}", flush=True)
+            await asyncio.sleep(2)
+
+    async def _solve_single_token(self, proxy: dict, browser) -> str:
+        """Solve a single token using the given proxy and browser context."""
+        req_token, version, config = await asyncio.to_thread(
+            get_hcaptcha_materials, proxy["http"]
+        )
+        hsw_token = await solve_hsw(req_token, proxy["http"], browser)
+        hcaptcha_token = await asyncio.to_thread(
+            submit_captcha, hsw_token, version, config, proxy["http"]
+        )
+        return hcaptcha_token
+
+    async def _solver_loop(self, key: str):
+        """Continuously solve tokens for a specific proxy key."""
         # Stagger start
-        await asyncio.sleep(worker_id * 3)
+        await asyncio.sleep(random.uniform(0.5, 3.0))
 
         while self._running:
             try:
@@ -220,37 +277,46 @@ class TokenPool:
                     continue
 
                 self._solving += 1
-                print(f"  [solver-{worker_id}] solving token (pool={self.available}, solving={self._solving})...", flush=True)
-
-                # Get proxy
+                print(f"  [solver-{key[:6]}] requesting proxy...", flush=True)
+                
+                t_ip_acquired = time.time()
+                # Get proxy (handles API calls/cooldown internally)
                 proxy = await self.proxy_pool._fetch_proxy(key)
 
-                # Solve captcha
-                t0 = time.time()
-                req_token, version, config = await asyncio.to_thread(
-                    get_hcaptcha_materials, proxy["http"]
-                )
+                # Solve 3-5 tokens using this IP
+                num_tokens = random.randint(3, 5)
+                print(f"  [solver-{key[:6]}] IP acquired: {proxy['raw']}. Solving {num_tokens} tokens...", flush=True)
 
                 async with AsyncCamoufox(headless=True, os='windows', proxy={'server': proxy["http"]}) as browser:
-                    hsw_token = await solve_hsw(req_token, proxy["http"], browser)
+                    tasks = [self._solve_single_token(proxy, browser) for _ in range(num_tokens)]
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                hcaptcha_token = await asyncio.to_thread(
-                    submit_captcha, hsw_token, version, config, proxy["http"]
-                )
+                success_count = 0
+                now = time.time()
+                for res in results:
+                    if isinstance(res, Exception):
+                        print(f"  [solver-{key[:6]}] ✗ token solve failed: {str(res)[:80]}", flush=True)
+                    else:
+                        success_count += 1
+                        self._total_solved += 1
+                        async with self._lock:
+                            self._tokens.append((res, proxy, now))
 
-                solve_time = time.time() - t0
-                self._total_solved += 1
                 self._solving -= 1
+                print(f"  [solver-{key[:6]}] ✓ finished cycle: {success_count}/{num_tokens} solved (pool={self.available})", flush=True)
 
-                # Add to pool
-                async with self._lock:
-                    self._tokens.append((hcaptcha_token, proxy, time.time()))
+                # Cooldown wait: ensure we wait at least 60 seconds from IP fetch to respect provider limit
+                elapsed = time.time() - t_ip_acquired
+                wait_time = max(0.0, 60.0 - elapsed)
+                if wait_time > 0 and self._running:
+                    print(f"  [solver-{key[:6]}] sleeping {wait_time:.1f}s for IP rotation cooldown...", flush=True)
+                    await asyncio.sleep(wait_time)
 
-                print(f"  [solver-{worker_id}] ✓ token solved ({solve_time:.1f}s, pool={self.available})", flush=True)
-
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 self._solving -= 1
-                print(f"  [solver-{worker_id}] ✗ error: {str(e)[:60]}", flush=True)
+                print(f"  [solver-{key[:6]}] ✗ error: {str(e)[:80]}", flush=True)
                 await asyncio.sleep(5)
 
 
@@ -517,8 +583,7 @@ async def handle_proxy_add(request):
         return web.json_response({"error": "key already exists"}, status=409)
 
     # Start a new solver for this key
-    solver_task = asyncio.create_task(token_pool._solver_loop(len(token_pool.proxy_pool.keys) - 1))
-    request.app["solver_tasks"].append(solver_task)
+    await token_pool.add_worker(key)
 
     print(f"  [admin] added proxy key {key[:6]}... (total: {len(token_pool.proxy_pool.keys)})", flush=True)
     return web.json_response({
@@ -544,6 +609,9 @@ async def handle_proxy_remove(request):
     if not removed:
         return web.json_response({"error": "key not found"}, status=404)
 
+    # Stop the worker for this key
+    await token_pool.remove_worker(key)
+
     print(f"  [admin] removed proxy key {key[:6]}... (total: {len(token_pool.proxy_pool.keys)})", flush=True)
     return web.json_response({
         "status": "removed",
@@ -557,7 +625,7 @@ async def on_startup(app):
     proxy_pool = ProxyPool(PROXY_KEYS)
     token_pool = TokenPool(proxy_pool, target_size=app["pool_target"])
     app["token_pool"] = token_pool
-    app["solver_tasks"] = await token_pool.start()
+    await token_pool.start()
     print("[*] TTS API server (pool mode) ready", flush=True)
 
 
@@ -566,8 +634,6 @@ async def on_cleanup(app):
     token_pool = app.get("token_pool")
     if token_pool:
         await token_pool.stop()
-    for task in app.get("solver_tasks", []):
-        task.cancel()
 
 
 def create_app(pool_target: int = 5):

@@ -1,12 +1,39 @@
-node_modules/
+# Python
 __pycache__/
 *.pyc
-logs/
+*.pyo
+*.pyd
+.pytest_cache/
+venv/
+.venv/
+
+# Node.js
+node_modules/
+
+# OS
+.DS_Store
+
+# Application logs & state files
+*.log
+api_pool_log.txt
+api_pool_requests.log
+api_requests.log
+batch100_log.txt
+par_test4_log.txt
+par_test5_log.txt
+run100_log.txt
+run500_log.txt
+.tts_server.json
 .tts_server.pid
 .tts_tunnel.pid
-.tts_server.json
-*.log
+
+# Temporary text / input / chunks / audio outputs
 *.mp3
-*.wav
-output_*/
-batch/
+*_chunks.txt
+1 Tin trong*
+concat_list.txt
+run_batch_800.txt
+run_test10.txt
+test_proxy/
+output_tts_test20/
+output_tts_test_local/

@@ -1,7 +1,14 @@
 {
-  "name": "serve-11labs",
+  "name": "elevenlabs-re",
   "version": "1.0.0",
-  "description": "hCaptcha solver dependencies for TTS server",
+  "description": "",
+  "main": "hsw_current.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
     "canvas": "^3.2.3",
     "jsdom": "^29.1.1",

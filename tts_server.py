@@ -1,21 +1,21 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 ElevenLabs TTS Server Manager CLI
 
 Manage TTS API servers with optional token pool and cloudflared tunnel.
 
 Usage:
-    python3 tts_server.py start [--mode basic|pool] [--port PORT] [--pool-size N] [--tunnel]
-    python3 tts_server.py stop
-    python3 tts_server.py status
-    python3 tts_server.py logs [--follow] [--lines N]
-    python3 tts_server.py tunnel [--start|--stop]
+    python tts_server.py start [--mode basic|pool] [--port PORT] [--pool-size N] [--tunnel]
+    python tts_server.py stop
+    python tts_server.py status
+    python tts_server.py logs [--follow] [--lines N]
+    python tts_server.py tunnel [--start|--stop]
 
 Examples:
-    python3 tts_server.py start --mode pool --pool-size 5 --tunnel
-    python3 tts_server.py start --mode basic --port 8899
-    python3 tts_server.py status
-    python3 tts_server.py stop
+    python tts_server.py start --mode pool --pool-size 5 --tunnel
+    python tts_server.py start --mode basic --port 8899
+    python tts_server.py status
+    python tts_server.py stop
 """
 
 import argparse
@@ -82,7 +82,7 @@ def start_server(args):
     """Start TTS API server."""
     running, pid = is_running(PID_FILE)
     if running:
-        print(f"[!] Server already running (PID {pid}). Stop it first: python3 tts_server.py stop")
+        print(f"[!] Server already running (PID {pid}). Stop it first: python tts_server.py stop")
         return
 
     LOG_DIR.mkdir(exist_ok=True)
@@ -141,7 +141,7 @@ def start_server(args):
         except Exception:
             pass
     else:
-        print(f"\n[!] Server may still be starting. Check logs: python3 tts_server.py logs")
+        print(f"\n[!] Server may still be starting. Check logs: python tts_server.py logs")
 
     # Start tunnel if requested
     if args.tunnel:

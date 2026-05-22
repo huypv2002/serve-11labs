@@ -1,0 +1,22 @@
+{
+  "name": "tts-gateway",
+  "main": "src/worker.js",
+  "compatibility_date": "2024-01-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tts-keys",
+      "database_id": "82c39f20-1e1f-4b74-a1d5-38c47f784b28"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "tts.liveyt.pro/*",
+      "zone_name": "liveyt.pro"
+    }
+  ],
+  "vars": {
+    "ADMIN_TOKEN": "tts-admin-secret-2026",
+    "ORIGIN_URL": "https://tts-origin.liveyt.pro"
+  }
+}

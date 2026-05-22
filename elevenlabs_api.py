@@ -13,7 +13,7 @@ Endpoints:
     Returns: {"status": "ok", "queue": N}
 
 Usage:
-    python3 elevenlabs_api.py --port 8899
+    python elevenlabs_api.py --port 8899
     
     curl -X POST http://localhost:8899/tts \
       -H "Content-Type: application/json" \
@@ -47,8 +47,10 @@ REQUESTS_PER_IP = 3
 
 PROXY_API = "https://proxyxoay.shop/api/get.php"
 PROXY_KEYS = [
-    "mWaQAhVpDxNSxQMshMpfvV",
-    "ejvdCkHfVufMQdUCefruiR",
+    "WGVvsWnSIkNoBlcIffKFPJ",
+    "HWgDVrhXHdgVlbOGFLucVp",
+    "gIyeGmqZSePouzcZEwAKhy",
+    "mrpLsUPXIBPnVFoQqAOVzu"
 ]
 
 

@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TTS API - Quản trị</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f1117; color: #e4e4e7; min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid #27272a; margin-bottom: 30px; }
+        .header h1 { font-size: 24px; color: #fff; }
+        .header .badge { background: #22c55e; color: #000; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .login-box { max-width: 400px; margin: 100px auto; padding: 40px; background: #18181b; border-radius: 12px; border: 1px solid #27272a; }
+        .login-box h2 { margin-bottom: 20px; text-align: center; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+        .stat-card { background: #18181b; border: 1px solid #27272a; border-radius: 10px; padding: 16px; }
+        .stat-card .label { font-size: 12px; color: #71717a; margin-bottom: 4px; }
+        .stat-card .value { font-size: 24px; font-weight: 700; color: #fff; }
+        .stat-card .value.green { color: #22c55e; }
+        .stat-card .value.purple { color: #a78bfa; }
+        .stat-card .value.orange { color: #f97316; }
+        .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+        .chart-card { background: #18181b; border: 1px solid #27272a; border-radius: 10px; padding: 20px; }
+        .chart-card h3 { font-size: 14px; color: #a1a1aa; margin-bottom: 12px; }
+        .chart-card canvas { max-height: 220px; }
+        .charts-full { margin-bottom: 24px; }
+        .charts-full .chart-card canvas { max-height: 180px; }
+        .section { margin-bottom: 30px; }
+        .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .section-header h2 { font-size: 18px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #27272a; }
+        th { color: #71717a; font-size: 11px; text-transform: uppercase; font-weight: 600; }
+        .key-text { font-family: monospace; font-size: 12px; color: #a78bfa; word-break: break-all; }
+        .badge-active { background: #22c55e20; color: #22c55e; padding: 2px 8px; border-radius: 6px; font-size: 11px; }
+        .badge-inactive { background: #ef444420; color: #ef4444; padding: 2px 8px; border-radius: 6px; font-size: 11px; }
+        .btn { padding: 6px 12px; border: none; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s; }
+        .btn-primary { background: #6366f1; color: #fff; }
+        .btn-primary:hover { background: #4f46e5; }
+        .btn-danger { background: #ef444420; color: #ef4444; border: 1px solid #ef444440; }
+        .btn-danger:hover { background: #ef444440; }
+        .btn-sm { padding: 4px 8px; font-size: 11px; }
+        .btn-toggle { background: #27272a; color: #e4e4e7; }
+        .btn-toggle:hover { background: #3f3f46; }
+        .btn-success { background: #22c55e20; color: #22c55e; border: 1px solid #22c55e40; }
+        input, select { width: 100%; padding: 10px 14px; border: 1px solid #27272a; border-radius: 8px; background: #09090b; color: #e4e4e7; font-size: 14px; margin-bottom: 12px; }
+        input:focus { outline: none; border-color: #6366f1; }
+        label { font-size: 13px; color: #a1a1aa; display: block; margin-bottom: 4px; }
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 30px; width: 420px; max-width: 90vw; }
+        .modal h3 { margin-bottom: 20px; }
+        .toast { position: fixed; bottom: 20px; right: 20px; padding: 12px 20px; background: #22c55e; color: #000; border-radius: 8px; font-size: 14px; font-weight: 500; display: none; z-index: 200; }
+        .toast.error { background: #ef4444; color: #fff; }
+        .toast.show { display: block; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+        .tab { padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; background: #27272a; color: #a1a1aa; }
+        .tab.active { background: #6366f1; color: #fff; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        @media (max-width: 768px) { .charts-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div id="loginPage" class="container">
+        <div class="login-box">
+            <h2>TTS API - Quản trị</h2>
+            <label>Mã quản trị</label>
+            <input type="password" id="adminToken" placeholder="Nhập mã quản trị..." onkeydown="if(event.key==='Enter')login()">
+            <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="login()">Đăng nhập</button>
+        </div>
+    </div>
+
+    <div id="dashboard" class="container" style="display:none">
+        <div class="header">
+            <h1>TTS API - Quản trị</h1>
+            <div>
+                <span class="badge">LIVE</span>
+                <button class="btn btn-toggle btn-sm" style="margin-left:12px" onclick="logout()">Đăng xuất</button>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('overview')">Tổng quan</div>
+            <div class="tab" onclick="switchTab('keys')">Khóa API</div>
+            <div class="tab" onclick="switchTab('usage')">Thống kê</div>
+            <div class="tab" onclick="switchTab('logs')">Logs</div>
+            <div class="tab" onclick="switchTab('proxy')">Proxy</div>
+        </div>
+
+        <!-- Overview Tab -->
+        <div class="tab-content active" id="tab-overview">
+            <div class="stats">
+                <div class="stat-card"><div class="label">Tổng khóa</div><div class="value" id="statTotalKeys">-</div></div>
+                <div class="stat-card"><div class="label">Đang hoạt động</div><div class="value green" id="statActiveKeys">-</div></div>
+                <div class="stat-card"><div class="label">Yêu cầu hôm nay</div><div class="value purple" id="statToday">-</div></div>
+                <div class="stat-card"><div class="label">Tổng yêu cầu</div><div class="value" id="statTotal">-</div></div>
+                <div class="stat-card"><div class="label">Tổng doanh thu</div><div class="value green" id="statRevenue">-</div></div>
+                <div class="stat-card"><div class="label">Ký tự đã tạo</div><div class="value orange" id="statChars">-</div></div>
+            </div>
+
+            <!-- Charts -->
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h3>Yêu cầu (7 ngày)</h3>
+                    <canvas id="chartRequests"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Doanh thu (7 ngày)</h3>
+                    <canvas id="chartRevenue"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Ký tự đã tạo (7 ngày)</h3>
+                    <canvas id="chartChars"></canvas>
+                </div>
+                <div class="chart-card">
+                    <h3>Thành công vs Lỗi</h3>
+                    <canvas id="chartPie"></canvas>
+                </div>
+            </div>
+            <div class="charts-full">
+                <div class="chart-card">
+                    <h3>Người dùng chi tiêu nhiều nhất</h3>
+                    <canvas id="chartUsers"></canvas>
+                </div>
+            </div>
+
+            <div class="stat-card" style="max-width:400px">
+                <p style="color:#a1a1aa;font-size:13px">Giá mỗi ký tự: <strong style="color:#fff">1 VND</strong></p>
+                <p style="color:#a1a1aa;font-size:13px;margin-top:8px">Ví dụ: 800 ký tự = 800 VND</p>
+                <p style="color:#a1a1aa;font-size:13px;margin-top:4px">Tối đa: 1000 ký tự/yêu cầu</p>
+            </div>
+        </div>
+
+        <!-- Keys Tab -->
+        <div class="tab-content" id="tab-keys">
+            <div class="section-header">
+                <h2>Khóa API</h2>
+                <button class="btn btn-primary" onclick="showCreateModal()">+ Tạo khóa</button>
+            </div>
+            <table>
+                <thead><tr>
+                    <th>Tên</th><th>Khóa</th><th>Trạng thái</th><th>Số dư</th><th>Đã chi</th><th>Yêu cầu</th><th>Giới hạn</th><th>Lần cuối</th><th>Thao tác</th>
+                </tr></thead>
+                <tbody id="keysTable"></tbody>
+            </table>
+        </div>
+
+        <!-- Usage Tab -->
+        <div class="tab-content" id="tab-usage">
+            <div class="section-header">
+                <h2>Thống kê sử dụng</h2>
+                <select id="usageDays" style="width:auto;margin:0" onchange="loadUsage()">
+                    <option value="1">24 giờ qua</option>
+                    <option value="7" selected>7 ngày qua</option>
+                    <option value="30">30 ngày qua</option>
+                </select>
+            </div>
+            <table>
+                <thead><tr>
+                    <th>Khóa API</th><th>Yêu cầu</th><th>Thành công</th><th>Lỗi</th><th>TB thời gian</th><th>Tổng chi phí</th>
+                </tr></thead>
+                <tbody id="usageTable"></tbody>
+            </table>
+        </div>
+
+        <!-- Logs Tab -->
+        <div class="tab-content" id="tab-logs">
+            <div class="section-header">
+                <h2>Request Logs</h2>
+                <div>
+                    <button class="btn btn-toggle btn-sm" onclick="logsPage=1;loadLogs()">Refresh</button>
+                </div>
+            </div>
+            <div style="overflow-x:auto">
+            <table>
+                <thead><tr>
+                    <th>Thời gian</th><th>Khách</th><th>Voice</th><th>Text</th><th>Chars</th><th>Status</th><th>Time</th><th>Cost</th><th>IP</th><th>Error</th>
+                </tr></thead>
+                <tbody id="logsTable"></tbody>
+            </table>
+            </div>
+            <div style="display:flex;justify-content:center;gap:10px;margin-top:16px">
+                <button class="btn btn-toggle btn-sm" onclick="logsPage--;loadLogs()" id="logsPrev">Prev</button>
+                <span id="logsPageInfo" style="color:#71717a;font-size:13px;line-height:28px">-</span>
+                <button class="btn btn-toggle btn-sm" onclick="logsPage++;loadLogs()" id="logsNext">Next</button>
+            </div>
+        </div>
+
+        <!-- Proxy Tab -->
+        <div class="tab-content" id="tab-proxy">
+            <div class="section-header">
+                <h2>Proxy Keys (proxyxoay.shop)</h2>
+                <div>
+                    <button class="btn btn-primary" onclick="addProxyKeysBulk()">+ Thêm hàng loạt</button>
+                    <button class="btn btn-toggle" onclick="addProxyKey()">+ Thêm 1 key</button>
+                </div>
+            </div>
+            <p style="color:#71717a;font-size:13px;margin-bottom:16px">Mỗi proxy key = 1 worker giải captcha = ~3 yêu cầu TTS/phút</p>
+            <div class="stats" style="margin-bottom:16px">
+                <div class="stat-card"><div class="label">Đang hoạt động</div><div class="value" id="proxyCount">-</div></div>
+                <div class="stat-card"><div class="label">Solver đang chạy</div><div class="value green" id="proxySolvers">-</div></div>
+                <div class="stat-card"><div class="label">Thông lượng ước tính</div><div class="value purple" id="proxyThroughput">-</div></div>
+            </div>
+            <table>
+                <thead><tr><th>#</th><th>Key (ẩn)</th><th>Thao tác</th></tr></thead>
+                <tbody id="proxyTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Create Key Modal -->
+    <div class="modal-overlay" id="createModal">
+        <div class="modal">
+            <h3>Tạo khóa API</h3>
+            <label>Tên</label><input type="text" id="keyName" placeholder="VD: Khách hàng A">
+            <label>Email</label><input type="email" id="keyEmail" placeholder="email@example.com">
+            <label>Giới hạn (req/phút)</label><input type="number" id="keyRateLimit" value="10" min="1" max="100">
+            <label>Số dư ban đầu (VND)</label><input type="number" id="keyBalance" value="100000" min="0">
+            <label>Hết hạn (tùy chọn)</label><input type="date" id="keyExpires">
+            <div style="display:flex;gap:10px;margin-top:16px">
+                <button class="btn btn-primary" style="flex:1" onclick="createKey()">Tạo</button>
+                <button class="btn btn-toggle" style="flex:1" onclick="hideModal('createModal')">Hủy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Key Modal -->
+    <div class="modal-overlay" id="newKeyModal">
+        <div class="modal">
+            <h3>Đã tạo khóa</h3>
+            <p style="color:#71717a;margin-bottom:12px">Sao chép khóa ngay.</p>
+            <input type="text" id="newKeyValue" readonly style="font-family:monospace;color:#22c55e;font-size:15px">
+            <button class="btn btn-primary" style="width:100%;margin-top:12px" onclick="copyKey()">Sao chép</button>
+            <button class="btn btn-toggle" style="width:100%;margin-top:8px" onclick="hideModal('newKeyModal');loadKeys()">Xong</button>
+        </div>
+    </div>
+
+    <!-- Edit Key Modal -->
+    <div class="modal-overlay" id="editModal">
+        <div class="modal">
+            <h3>Sửa khóa</h3>
+            <input type="hidden" id="editKeyId">
+            <label>Giới hạn (req/phút)</label><input type="number" id="editRateLimit" min="1" max="100">
+            <div style="display:flex;gap:10px;margin-top:16px">
+                <button class="btn btn-primary" style="flex:1" onclick="saveEdit()">Lưu</button>
+                <button class="btn btn-toggle" style="flex:1" onclick="hideModal('editModal')">Hủy</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Proxy Modal -->
+    <div class="modal-overlay" id="bulkProxyModal">
+        <div class="modal">
+            <h3>Thêm hàng loạt Proxy Keys</h3>
+            <label>Mỗi dòng 1 key</label>
+            <textarea id="bulkProxyKeys" rows="8" style="width:100%;padding:10px 14px;border:1px solid #27272a;border-radius:8px;background:#09090b;color:#e4e4e7;font-family:monospace;font-size:13px;resize:vertical" placeholder="key1&#10;key2&#10;key3&#10;..."></textarea>
+            <div style="display:flex;gap:10px;margin-top:16px">
+                <button class="btn btn-primary" style="flex:1" onclick="submitBulkProxy()">Thêm tất cả</button>
+                <button class="btn btn-toggle" style="flex:1" onclick="hideModal('bulkProxyModal')">Hủy</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let adminToken = localStorage.getItem('tts_admin_token') || '';
+        let charts = {};
+
+        Chart.defaults.color = '#71717a';
+        Chart.defaults.borderColor = '#27272a';
+
+        if (adminToken) showDashboard();
+
+        function login() {
+            adminToken = document.getElementById('adminToken').value.trim();
+            if (!adminToken) return;
+            localStorage.setItem('tts_admin_token', adminToken);
+            showDashboard();
+        }
+        function logout() { localStorage.removeItem('tts_admin_token'); location.reload(); }
+
+        function showDashboard() {
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'block';
+            loadStats();
+            loadKeys();
+            loadUsage();
+            loadCharts();
+            loadProxy();
+            loadLogs();
+        }
+
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+            document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+            event.target.classList.add('active');
+            document.getElementById('tab-' + name).classList.add('active');
+        }
+
+        async function api(path, method, body) {
+            method = method || 'GET';
+            var opts = { method: method, headers: { 'Authorization': 'Bearer ' + adminToken, 'Content-Type': 'application/json' } };
+            if (body) opts.body = JSON.stringify(body);
+            var resp = await fetch(API_BASE + path, opts);
+            if (resp.status === 401) { localStorage.removeItem('tts_admin_token'); location.reload(); return null; }
+            return resp.json();
+        }
+
+        async function loadStats() {
+            var data = await api('/admin/stats');
+            if (!data) return;
+            document.getElementById('statTotalKeys').textContent = data.total_keys;
+            document.getElementById('statActiveKeys').textContent = data.active_keys;
+            document.getElementById('statToday').textContent = data.requests_today;
+            document.getElementById('statTotal').textContent = data.requests_total;
+            document.getElementById('statRevenue').textContent = Number(data.total_revenue || 0).toLocaleString() + ' VND';
+            document.getElementById('statChars').textContent = Number(data.total_chars || 0).toLocaleString();
+        }
+
+        async function loadCharts() {
+            var data = await api('/admin/charts');
+            if (!data) return;
+
+            // Requests line chart
+            if (charts.requests) charts.requests.destroy();
+            charts.requests = new Chart(document.getElementById('chartRequests'), {
+                type: 'line',
+                data: {
+                    labels: data.daily.map(function(d) { return d.date.slice(5); }),
+                    datasets: [{
+                        label: 'Yêu cầu',
+                        data: data.daily.map(function(d) { return d.requests; }),
+                        borderColor: '#6366f1',
+                        backgroundColor: '#6366f120',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+
+            // Revenue bar chart
+            if (charts.revenue) charts.revenue.destroy();
+            charts.revenue = new Chart(document.getElementById('chartRevenue'), {
+                type: 'bar',
+                data: {
+                    labels: data.daily.map(function(d) { return d.date.slice(5); }),
+                    datasets: [{
+                        label: 'Doanh thu (VND)',
+                        data: data.daily.map(function(d) { return d.revenue; }),
+                        backgroundColor: '#22c55e80',
+                        borderColor: '#22c55e',
+                        borderWidth: 1
+                    }]
+                },
+                options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+
+            // Chars area chart
+            if (charts.chars) charts.chars.destroy();
+            charts.chars = new Chart(document.getElementById('chartChars'), {
+                type: 'line',
+                data: {
+                    labels: data.daily.map(function(d) { return d.date.slice(5); }),
+                    datasets: [{
+                        label: 'Ký tự',
+                        data: data.daily.map(function(d) { return d.chars; }),
+                        borderColor: '#f97316',
+                        backgroundColor: '#f9731620',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+
+            // Success/Error pie chart
+            if (charts.pie) charts.pie.destroy();
+            charts.pie = new Chart(document.getElementById('chartPie'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Thành công', 'Lỗi'],
+                    datasets: [{
+                        data: [data.totals.success, data.totals.errors],
+                        backgroundColor: ['#22c55e', '#ef4444'],
+                        borderWidth: 0
+                    }]
+                },
+                options: { plugins: { legend: { position: 'bottom' } } }
+            });
+
+            // Top users horizontal bar
+            if (charts.users) charts.users.destroy();
+            if (data.top_users && data.top_users.length > 0) {
+                charts.users = new Chart(document.getElementById('chartUsers'), {
+                    type: 'bar',
+                    data: {
+                        labels: data.top_users.map(function(u) { return u.name || u.api_key.slice(0, 12); }),
+                        datasets: [{
+                            label: 'Chi tiêu (VND)',
+                            data: data.top_users.map(function(u) { return u.total_spent; }),
+                            backgroundColor: '#a78bfa80',
+                            borderColor: '#a78bfa',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: { indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+                });
+            }
+        }
+
+        async function loadKeys() {
+            var data = await api('/admin/keys');
+            if (!data) return;
+            var tbody = document.getElementById('keysTable');
+            tbody.innerHTML = data.keys.map(function(k) { return '<tr>'
+                + '<td><strong>' + k.name + '</strong>' + (k.email ? '<br><span style="color:#71717a;font-size:11px">' + k.email + '</span>' : '') + '</td>'
+                + '<td><span class="key-text">' + k.key + '</span> <button class="btn btn-toggle btn-sm" onclick="copyText(\'' + k.key + '\')">Sao chép</button></td>'
+                + '<td>' + (k.active ? '<span class="badge-active">Active</span>' : '<span class="badge-inactive">Inactive</span>') + '</td>'
+                + '<td><strong style="color:#22c55e">' + Number(k.balance || 0).toLocaleString() + '</strong> VND</td>'
+                + '<td>' + Number(k.total_spent || 0).toLocaleString() + ' VND</td>'
+                + '<td>' + k.usage_count + '</td>'
+                + '<td>' + k.rate_limit + '/min</td>'
+                + '<td style="color:#71717a;font-size:11px">' + (k.last_used || 'Chưa dùng') + '</td>'
+                + '<td>'
+                + '<button class="btn btn-success btn-sm" onclick="topupKey(' + k.id + ',\'' + k.name + '\')">+$</button> '
+                + '<button class="btn btn-toggle btn-sm" onclick="editKey(' + k.id + ',' + k.rate_limit + ')">Sửa</button> '
+                + '<button class="btn btn-toggle btn-sm" onclick="toggleKey(' + k.id + ')">' + (k.active ? 'Off' : 'On') + '</button> '
+                + '<button class="btn btn-danger btn-sm" onclick="deleteKey(' + k.id + ',\'' + k.name + '\')">Xóa</button>'
+                + '</td></tr>'; }).join('');
+        }
+
+        async function loadUsage() {
+            var days = document.getElementById('usageDays').value;
+            var data = await api('/admin/usage?days=' + days);
+            if (!data) return;
+            var tbody = document.getElementById('usageTable');
+            if (!data.usage || data.usage.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="color:#71717a;text-align:center">Chưa có dữ liệu</td></tr>';
+                return;
+            }
+            tbody.innerHTML = data.usage.map(function(u) { return '<tr>'
+                + '<td style="font-family:monospace;font-size:11px">' + (u.api_key || '').slice(0, 16) + '...</td>'
+                + '<td>' + u.requests + '</td>'
+                + '<td style="color:#22c55e">' + (u.success || 0) + '</td>'
+                + '<td style="color:#ef4444">' + (u.errors || 0) + '</td>'
+                + '<td>' + Math.round(u.avg_time || 0) + 'ms</td>'
+                + '<td>' + Number(u.total_cost || 0).toLocaleString() + ' VND</td>'
+                + '</tr>'; }).join('');
+        }
+
+        function showCreateModal() { document.getElementById('createModal').classList.add('active'); }
+        function hideModal(id) { document.getElementById(id).classList.remove('active'); }
+
+        async function createKey() {
+            var name = document.getElementById('keyName').value.trim();
+            var email = document.getElementById('keyEmail').value.trim();
+            var rateLimit = parseInt(document.getElementById('keyRateLimit').value) || 10;
+            var balance = parseInt(document.getElementById('keyBalance').value) || 0;
+            var expires = document.getElementById('keyExpires').value;
+            if (!name) { toast('Vui lòng nhập tên', true); return; }
+            var data = await api('/admin/keys', 'POST', { name: name, email: email, rate_limit: rateLimit, balance: balance, expires_at: expires || null });
+            if (data && data.key) {
+                hideModal('createModal');
+                document.getElementById('newKeyValue').value = data.key;
+                document.getElementById('newKeyModal').classList.add('active');
+                loadStats(); loadCharts();
+                toast('Đã tạo khóa!');
+            }
+        }
+
+        async function toggleKey(id) { await api('/admin/keys/' + id + '/toggle', 'POST'); loadKeys(); loadStats(); }
+
+        async function topupKey(id, name) {
+            var amount = prompt('Nạp tiền cho "' + name + '" (VND):');
+            if (!amount || isNaN(amount) || parseInt(amount) <= 0) return;
+            var data = await api('/admin/keys/' + id + '/topup', 'POST', { amount: parseInt(amount) });
+            if (data) { toast('Topped up ' + parseInt(amount).toLocaleString() + ' VND'); loadKeys(); }
+        }
+
+        function editKey(id, rateLimit) {
+            document.getElementById('editKeyId').value = id;
+            document.getElementById('editRateLimit').value = rateLimit;
+            document.getElementById('editModal').classList.add('active');
+        }
+
+        async function saveEdit() {
+            var id = document.getElementById('editKeyId').value;
+            var rateLimit = parseInt(document.getElementById('editRateLimit').value) || 10;
+            await api('/admin/keys/' + id + '/edit', 'POST', { rate_limit: rateLimit });
+            hideModal('editModal'); loadKeys(); toast('Đã cập nhật!');
+        }
+
+        async function deleteKey(id, name) {
+            if (!confirm('Xóa khóa "' + name + '"?')) return;
+            await api('/admin/keys/' + id, 'DELETE');
+            loadKeys(); loadStats(); loadCharts(); toast('Đã xóa khóa');
+        }
+
+        function copyKey() { var input = document.getElementById('newKeyValue'); input.select(); navigator.clipboard.writeText(input.value); toast('Đã sao chép!'); }
+        function copyText(text) { navigator.clipboard.writeText(text); toast('Đã sao chép!'); }
+        function toast(msg, isError) { var el = document.getElementById('toast'); el.textContent = msg; el.className = 'toast show' + (isError ? ' error' : ''); setTimeout(function() { el.className = 'toast'; }, 3000); }
+
+        async function loadProxy() {
+            var data = await api('/proxy/keys');
+            if (!data) return;
+            document.getElementById('proxyCount').textContent = data.count;
+            document.getElementById('proxySolvers').textContent = data.solvers;
+            document.getElementById('proxyThroughput').textContent = '~' + (data.count * 3) + ' req/min';
+            var tbody = document.getElementById('proxyTable');
+            tbody.innerHTML = data.keys.map(function(k, i) { return '<tr>'
+                + '<td>' + (i + 1) + '</td>'
+                + '<td style="font-family:monospace">' + k + '</td>'
+                + '<td><button class="btn btn-danger btn-sm" onclick="removeProxyKey(\'' + k + '\')">Xóa</button></td>'
+                + '</tr>'; }).join('');
+        }
+
+        var logsPage = 1;
+        async function loadLogs() {
+            if (logsPage < 1) logsPage = 1;
+            var data = await api('/admin/logs?page=' + logsPage + '&limit=30');
+            if (!data) return;
+            document.getElementById('logsPageInfo').textContent = 'Trang ' + data.page + '/' + data.pages + ' (' + data.total + ' logs)';
+            document.getElementById('logsPrev').disabled = data.page <= 1;
+            document.getElementById('logsNext').disabled = data.page >= data.pages;
+            var tbody = document.getElementById('logsTable');
+            if (!data.logs || data.logs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" style="color:#71717a;text-align:center">Chưa có logs</td></tr>';
+                return;
+            }
+            var voiceNames = {'NOpBlnGInO9m6vDvFkFC':'Aria','9BWtsMINqrJLrRacOk9x':'Aria v2','EXAVITQu4vr4xnSDxMaL':'Sarah','g14YnDYCsy3k7XLlcKlO':'Custom'};
+            tbody.innerHTML = data.logs.map(function(l) {
+                var statusColor = l.status === 200 ? '#22c55e' : '#ef4444';
+                var voiceName = voiceNames[l.voice_id] || (l.voice_id ? l.voice_id.slice(0,8) : '-');
+                var timeStr = l.created_at ? l.created_at.replace('T',' ').slice(0,19) : '-';
+                return '<tr>'
+                + '<td style="font-size:11px;color:#a1a1aa;white-space:nowrap">' + timeStr + '</td>'
+                + '<td style="font-size:12px">' + (l.key_name || l.api_key.slice(0,10)) + '</td>'
+                + '<td style="font-size:11px">' + voiceName + '</td>'
+                + '<td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (l.text_preview || '').replace(/"/g,'&quot;') + '">' + (l.text_preview || '-') + '</td>'
+                + '<td>' + (l.chars || l.text_length) + '</td>'
+                + '<td style="color:' + statusColor + ';font-weight:600">' + l.status + '</td>'
+                + '<td>' + (l.response_time_ms ? Math.round(l.response_time_ms/1000*10)/10 + 's' : '-') + '</td>'
+                + '<td>' + (l.cost || 0) + ' VND</td>'
+                + '<td style="font-size:11px;color:#71717a">' + (l.ip || '-') + '</td>'
+                + '<td style="font-size:11px;color:#ef4444;max-width:150px;overflow:hidden;text-overflow:ellipsis" title="' + (l.error_msg || '').replace(/"/g,'&quot;') + '">' + (l.error_msg || '-') + '</td>'
+                + '</tr>'; }).join('');
+        }
+
+        async function addProxyKey() {
+            var key = prompt('Nhập proxyxoay.shop key:');
+            if (!key || key.trim().length < 10) return;
+            var data = await api('/proxy/add', 'POST', { key: key.trim() });
+            if (data && data.status === 'added') { toast('Đã thêm proxy key!'); loadProxy(); }
+            else if (data && data.error) { toast(data.error, true); }
+        }
+
+        async function addProxyKeysBulk() {
+            document.getElementById('bulkProxyModal').classList.add('active');
+        }
+
+        async function submitBulkProxy() {
+            var textarea = document.getElementById('bulkProxyKeys');
+            var keys = textarea.value.trim().split('\n').map(function(k) { return k.trim(); }).filter(function(k) { return k.length >= 10; });
+            if (keys.length === 0) { toast('Không có key hợp lệ', true); return; }
+            var added = 0;
+            var failed = 0;
+            for (var i = 0; i < keys.length; i++) {
+                var data = await api('/proxy/add', 'POST', { key: keys[i] });
+                if (data && data.status === 'added') added++;
+                else failed++;
+            }
+            hideModal('bulkProxyModal');
+            textarea.value = '';
+            toast('Đã thêm ' + added + ' key' + (failed > 0 ? ', lỗi ' + failed : ''));
+            loadProxy();
+        }
+
+        async function removeProxyKey(masked) {
+            var key = prompt('Nhập full key để xóa (masked: ' + masked + '):');
+            if (!key) return;
+            var data = await api('/proxy/remove', 'POST', { key: key.trim() });
+            if (data && data.status === 'removed') { toast('Đã xóa proxy key'); loadProxy(); }
+            else if (data && data.error) { toast(data.error, true); }
+        }
+    </script>
+</body>
+</html>
