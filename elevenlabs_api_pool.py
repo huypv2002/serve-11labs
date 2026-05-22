@@ -527,7 +527,87 @@ def upstream_error_payload(status_code: int, body: str) -> dict:
     }
 
 
-# === API Handlers ===
+async def handle_proxy_tts(request):
+    """
+    Transparent proxy for ElevenLabs TTS endpoints:
+    - POST /v1/text-to-speech/{voice_id}/anonymous
+    - POST /v1/text-to-speech/{voice_id}/stream/with-timestamps/anonymous
+    """
+    client_ip = request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For") or request.remote
+    voice_id = request.match_info.get("voice_id", DEFAULT_VOICE)
+    path = request.path
+
+    try:
+        body = await request.json()
+    except Exception:
+        log_request(client_ip, "", "error", "Invalid JSON")
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+
+    text = body.get("text", "").strip()
+    if not text:
+        log_request(client_ip, "", "error", "text is required")
+        return web.json_response({"error": "text is required"}, status=400)
+    if len(text) > 1000:
+        log_request(client_ip, text[:30], "error", "text too long")
+        return web.json_response({"error": "text too long (max 1000 chars)"}, status=400)
+
+    token_pool: TokenPool = request.app["token_pool"]
+    t0 = time.time()
+
+    try:
+        # Get pre-solved token from pool
+        hcaptcha_token, proxy = await token_pool.get_token(timeout=90.0)
+        t_token = time.time() - t0
+
+        # Replace token in the payload
+        body["hcaptcha_token"] = hcaptcha_token
+
+        # Forward request to ElevenLabs
+        url = f"{API_BASE}{path}"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Referer": "https://elevenlabs.io/",
+            "Origin": "https://elevenlabs.io",
+        }
+        for h in ["User-Agent", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "accept", "accept-language"]:
+            if h in request.headers:
+                headers[h] = request.headers[h]
+        if "User-Agent" not in headers:
+            headers["User-Agent"] = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36"
+
+        async with httpx.AsyncClient(proxy=proxy["http"], timeout=120.0, verify=False) as client:
+            resp = await client.post(url, json=body, headers=headers)
+
+        elapsed = time.time() - t0
+
+        if resp.status_code == 200:
+            log_request(client_ip, text[:50], "success", f"proxy {path} | {len(resp.content)}B in {elapsed:.1f}s (token_wait={t_token:.1f}s)")
+            
+            res_headers = {}
+            for h in ["Content-Type", "Content-Disposition", "Transfer-Encoding"]:
+                if h in resp.headers:
+                    res_headers[h] = resp.headers[h]
+            return web.Response(
+                body=resp.content,
+                status=resp.status_code,
+                headers=res_headers
+            )
+        elif resp.status_code == 401:
+            await token_pool.proxy_pool.mark_quota_hit(proxy)
+            body_preview = resp.text[:500]
+            log_request(client_ip, text[:50], "fail", f"proxy 401: {body_preview[:180]} ({elapsed:.1f}s)")
+            return web.json_response(upstream_error_payload(401, body_preview), status=503)
+        else:
+            body_preview = resp.text[:500]
+            log_request(client_ip, text[:50], "fail", f"proxy HTTP {resp.status_code}: {body_preview[:180]} ({elapsed:.1f}s)")
+            return web.json_response(upstream_error_payload(resp.status_code, body_preview), status=502)
+
+    except Exception as e:
+        elapsed = time.time() - t0
+        log_request(client_ip, text[:50], "error", f"proxy Exception: {str(e)[:180]} ({elapsed:.1f}s)")
+        return web.json_response({"error": str(e)}, status=500)
+
 
 async def handle_tts(request):
     """POST /tts — get pre-solved token, call TTS API instantly."""
@@ -732,6 +812,8 @@ def create_app(pool_target: int = 5):
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
     app.router.add_post("/tts", handle_tts)
+    app.router.add_post("/v1/text-to-speech/{voice_id}/stream/with-timestamps/anonymous", handle_proxy_tts)
+    app.router.add_post("/v1/text-to-speech/{voice_id}/anonymous", handle_proxy_tts)
     app.router.add_get("/health", handle_health)
     app.router.add_get("/voices", handle_voices)
     app.router.add_get("/proxy/keys", handle_proxy_keys)

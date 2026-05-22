@@ -105,8 +105,8 @@ export default {
     }
 
     // === Protected endpoints (require API key) ===
-    if (path === '/tts' && request.method === 'POST') {
-      return handleTTS(request, env);
+    if ((path === '/tts' || path.startsWith('/v1/text-to-speech/')) && request.method === 'POST') {
+      return handleTTS(request, env, path);
     }
 
     // Proxy key management (admin only via API key)
@@ -144,7 +144,7 @@ function normalizeRateLimit(value) {
 }
 
 // Handle TTS requests with auth
-async function handleTTS(request, env) {
+async function handleTTS(request, env, path) {
   const apiKey = getApiKey(request);
   if (!apiKey) {
     return json({ error: 'API key required. Use header: Authorization: Bearer <key>' }, 401);
@@ -181,7 +181,13 @@ async function handleTTS(request, env) {
   }
 
   const textLen = body.text?.length || 0;
-  const voiceId = body.voice_id || 'NOpBlnGInO9m6vDvFkFC';
+  let voiceId = body.voice_id || 'NOpBlnGInO9m6vDvFkFC';
+  if (path.startsWith('/v1/text-to-speech/')) {
+    const parts = path.split('/');
+    if (parts.length >= 4) {
+      voiceId = parts[3];
+    }
+  }
   const textPreview = (body.text || '').slice(0, 80);
   const clientIp = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || 'unknown';
   const cost = textLen * COST_PER_CHAR;
@@ -196,11 +202,21 @@ async function handleTTS(request, env) {
     }, 402);
   }
 
+  const originPath = path === '/tts' ? '/tts' : path;
+
   // Proxy to origin
   try {
-    const origin = await fetch(`${env.ORIGIN_URL}/tts`, {
+    const headers = { 'Content-Type': 'application/json' };
+    for (const h of ["user-agent", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "accept", "accept-language"]) {
+      const val = request.headers.get(h);
+      if (val) {
+        headers[h] = val;
+      }
+    }
+
+    const origin = await fetch(`${env.ORIGIN_URL}${originPath}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify(body),
     });
 
@@ -215,30 +231,50 @@ async function handleTTS(request, env) {
       // Log usage with details
       await env.DB.prepare(
         'INSERT INTO usage_logs (api_key, endpoint, text_length, response_time_ms, status, cost, chars, voice_id, text_preview, ip, key_name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).bind(apiKey, '/tts', textLen, responseTime, 200, cost, textLen, voiceId, textPreview, clientIp, keyRow.name).run();
+      ).bind(apiKey, originPath, textLen, responseTime, 200, cost, textLen, voiceId, textPreview, clientIp, keyRow.name).run();
 
       // Log transaction
       await env.DB.prepare(
         'INSERT INTO transactions (api_key, amount, type, note) VALUES (?, ?, ?, ?)'
       ).bind(apiKey, -cost, 'usage', `TTS ${textLen} chars`).run();
 
+      const responseHeaders = new Headers({
+        'X-Response-Time': `${responseTime}ms`,
+        'X-Cost': `${cost}`,
+        'X-Balance': `${keyRow.balance - cost}`,
+        ...CORS_HEADERS,
+      });
+
+      // Copy Content-Type and Content-Disposition from origin if they exist
+      const contentType = origin.headers.get('Content-Type');
+      if (contentType) {
+        responseHeaders.set('Content-Type', contentType);
+      } else {
+        responseHeaders.set('Content-Type', 'audio/mpeg');
+      }
+
+      const contentDisp = origin.headers.get('Content-Disposition');
+      if (contentDisp) {
+        responseHeaders.set('Content-Disposition', contentDisp);
+      } else if (originPath === '/tts') {
+        responseHeaders.set('Content-Disposition', 'attachment; filename=tts.mp3');
+      }
+
+      const transferEncoding = origin.headers.get('Transfer-Encoding');
+      if (transferEncoding) {
+        responseHeaders.set('Transfer-Encoding', transferEncoding);
+      }
+
       return new Response(origin.body, {
         status: 200,
-        headers: {
-          'Content-Type': 'audio/mpeg',
-          'Content-Disposition': 'attachment; filename=tts.mp3',
-          'X-Response-Time': `${responseTime}ms`,
-          'X-Cost': `${cost}`,
-          'X-Balance': `${keyRow.balance - cost}`,
-          ...CORS_HEADERS,
-        },
+        headers: responseHeaders,
       });
     } else {
       // Don't charge on failure
       const err = await origin.text();
       await env.DB.prepare(
         'INSERT INTO usage_logs (api_key, endpoint, text_length, response_time_ms, status, cost, chars, voice_id, text_preview, ip, key_name, error_msg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-      ).bind(apiKey, '/tts', textLen, responseTime, origin.status, 0, textLen, voiceId, textPreview, clientIp, keyRow.name, err.slice(0, 200)).run();
+      ).bind(apiKey, originPath, textLen, responseTime, origin.status, 0, textLen, voiceId, textPreview, clientIp, keyRow.name, err.slice(0, 200)).run();
 
       return json({ error: err }, origin.status);
     }
@@ -246,7 +282,7 @@ async function handleTTS(request, env) {
     const responseTime = Date.now() - t0;
     await env.DB.prepare(
       'INSERT INTO usage_logs (api_key, endpoint, text_length, response_time_ms, status, cost, chars, voice_id, text_preview, ip, key_name, error_msg) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).bind(apiKey, '/tts', textLen, responseTime, 500, 0, textLen, voiceId, textPreview, clientIp, keyRow.name, e.message.slice(0, 200)).run();
+    ).bind(apiKey, originPath, textLen, responseTime, 500, 0, textLen, voiceId, textPreview, clientIp, keyRow.name, e.message.slice(0, 200)).run();
     return json({ error: 'Origin server error: ' + e.message }, 500);
   }
 }
