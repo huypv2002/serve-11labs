@@ -585,7 +585,7 @@ async def handle_proxy_tts(request):
             log_request(client_ip, text[:50], "success", f"proxy {path} | {len(resp.content)}B in {elapsed:.1f}s (token_wait={t_token:.1f}s)")
             
             res_headers = {}
-            for h in ["Content-Type", "Content-Disposition", "Transfer-Encoding"]:
+            for h in ["Content-Type", "Content-Disposition"]:
                 if h in resp.headers:
                     res_headers[h] = resp.headers[h]
             return web.Response(

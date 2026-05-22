@@ -260,11 +260,6 @@ async function handleTTS(request, env, path) {
         responseHeaders.set('Content-Disposition', 'attachment; filename=tts.mp3');
       }
 
-      const transferEncoding = origin.headers.get('Transfer-Encoding');
-      if (transferEncoding) {
-        responseHeaders.set('Transfer-Encoding', transferEncoding);
-      }
-
       return new Response(origin.body, {
         status: 200,
         headers: responseHeaders,
