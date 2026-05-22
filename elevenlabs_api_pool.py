@@ -340,14 +340,14 @@ class TokenPool:
                 for res in results:
                     if isinstance(res, Exception):
                         self._record_failure(key, "token", res)
-                        print(f"  [solver-{key[:6]}] ✗ token solve failed: {str(res)[:80]}", flush=True)
+                        print(f"  [solver-{key[:6]}] token solve failed: {str(res)[:80]}", flush=True)
                     else:
                         success_count += 1
                         self._total_solved += 1
                         async with self._lock:
                             self._tokens.append((res, proxy, now))
 
-                print(f"  [solver-{key[:6]}] ✓ finished cycle: {success_count}/{num_tokens} solved (pool={self.available})", flush=True)
+                print(f"  [solver-{key[:6]}] finished cycle: {success_count}/{num_tokens} solved (pool={self.available})", flush=True)
                 self._set_solver_state(key, "cooldown", f"{success_count}/{num_tokens} solved")
                 self._solving = max(0, self._solving - 1)
                 cycle_started = False
@@ -363,7 +363,7 @@ class TokenPool:
                 break
             except Exception as e:
                 self._record_failure(key, "cycle", e)
-                print(f"  [solver-{key[:6]}] ✗ error: {str(e)[:80]}", flush=True)
+                print(f"  [solver-{key[:6]}] error: {str(e)[:80]}", flush=True)
                 await asyncio.sleep(5)
             finally:
                 if cycle_started:
